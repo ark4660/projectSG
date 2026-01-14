@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Curfew Control</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
+    <style>
+        body { font-family: Arial; text-align: center; padding: 50px; background: #1a1a2e; color: white; }
+        button { padding: 20px 40px; font-size: 1.5rem; border-radius: 10px; cursor: pointer; border: none; }
+        button.active { background-color: #38a169; } /* green when ON */
+        button.inactive { background-color: #e53e3e; } /* red when OFF */
+    </style>
+</head>
+<body>
+
+<h1>Curfew Control</h1>
+<button id="curfewBtn" class="inactive">CURFEW</button>
+<p>Current state on broker: <span id="stateDisplay">Unknown</span></p>
+
+<script>
+  // ----------------- Register Service Worker -----------------
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('/firebase-messaging-sw.js')
+      .then(reg => console.log('Service Worker registered:', reg))
+      .catch(err => console.error('SW registration failed:', err));
+  }
+     // ----------------- Firebase setup -----------------
+  const firebaseConfig = {
+    apiKey: "AIzaSyBXf5HCVAL4UfiHDSN_oyGUGioI2AQoBbc",
+    authDomain: "stwbdkw.firebaseapp.com",
+    databaseURL: "https://stwbdkw-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "stwbdkw",
+    storageBucket: "stwbdkw.firebasestorage.app",
+    messagingSenderId: "493454339708",
+    appId: "1:493454339708:web:bc72aea3b64309faa1a3f9"
+  };
+
+  // Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const messaging = firebase.messaging();
+
+let fcmToken = null;
+const backendUrl = "https://api.pooh.bio:3000/register-token"; // replace YOUR_SERVER_IP
+
+// Request notification permission & get token
+Notification.requestPermission().then(permission => {
+  if(permission === 'granted') {
+    messaging.getToken({ vapidKey: "BEAHI9-AVasUdNu-gJ3oyUkm5Mwq_RAhrIATM8h5LM1zlbndfE7wFRTzebVodCSsf84_vOMHA9jm1vzv-BuHWWU" })
+      .then(token => {
+        fcmToken = token;
+        console.log("FCM token:", fcmToken);
+        // Send token to backend
+        fetch(backendUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: fcmToken })
+        });
+      })
+      .catch(console.error);
+  } else {
+    console.log("Notification permission denied");
+  }
+});
+
+  // Foreground notifications
+  messaging.onMessage(payload => {
+    console.log("Foreground message received:", payload);
+    new Notification(payload.notification.title, {
+      body: payload.notification.body,
+      icon: payload.notification.icon || "/icon.png"
+    });
+  });
+    
+
+
+    // Connect to MQTT broker over WebSockets
+    const client = mqtt.connect('wss://api.pooh.bio:9001', {
+        username: 'esp32',
+        password: 'pHAN4002@p'
+    });
+
+    // When connected, subscribe to the topic
+    client.on('connect', () => {
+        console.log('Connected to MQTT broker');
+        client.subscribe('esp32/device1/state'); // subscribe to curfew state
+    });
+
+    // When a message arrives, update the button & display
+    client.on('message', (topic, message) => {
+        if (topic === 'esp32/device1/state') {
+            const state = message.toString();
+            stateDisplay.innerText = state;
+            curfewActive = (state === 'ON');
+            updateButton();
+        }
+    });
+
+    // Update button appearance based on curfewActive
+    function updateButton() {
+        if (curfewActive) {
+            curfewBtn.textContent = 'UNCURFEW';
+            curfewBtn.classList.add('active');
+            curfewBtn.classList.remove('inactive');
+        } else {
+            curfewBtn.textContent = 'CURFEW';
+            curfewBtn.classList.remove('active');
+            curfewBtn.classList.add('inactive');
+        }
+    }
+
+    // When user clicks, toggle state and publish to broker
+    curfewBtn.addEventListener('click', () => {
+        curfewActive = !curfewActive;
+        updateButton();
+        // Publish new state to broker with retain = true
+        client.publish('esp32/device1/state', curfewActive ? 'ON' : 'OFF', { retain: true });
+    });
+    
+</script>
+
+</body>
+</html>
